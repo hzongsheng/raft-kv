@@ -2,8 +2,6 @@
 
 本项目是一个基于 raft 协议的分布式 Key-Value 服务, 具有基于日志的节点选举, 心跳维护, 持久化功能.
 
-+++
-
 ## 如何运行 🏃
 
 假设一个三节点的系统:
@@ -46,7 +44,7 @@
 
    核心组件是 raft 算法的直接实现, 主要包含了 ==节点选举==, ==日志复制==.
 
-   其核心是 raft 算法([论文](./document.pdf), [博文](https://www.cnblogs.com/xybaby/p/10124083.html)),  raft 算法中节点可能有三种状态: `leader`, `follower`, `candidate`.
+   其核心是 raft 算法([论文](./document.pdf), [参考博客](https://www.cnblogs.com/xybaby/p/10124083.html)),  raft 算法中节点可能有三种状态: `leader`, `follower`, `candidate`.
    节点初始为 follower, 超时后发起选举变成 candidate, 选举成功变为 leader, 在 candidate 和 leader 状态收到了比自己 term 更大的消息则会变回 follower. 节点选举和任期通过 term 标示, term 单调递增.
 
    系统运行的过程大致是这样: 节点用 `term` 标志当前任期, `voteFor` 标志本任期投给了谁. 初始时节点 `term` 为 0, `voteFor` 为 `null`, 一段时间后, 节点可能收到了其他节点的投票信息, 节点选择投或不投.
@@ -83,12 +81,27 @@
 
 3. 客户端组件
 
-   客户端组件用来向用户提供命令行操作界面, 支持 set/get/exit 等命令, 命令回车之后会通过 socket 被发送到 server, server 完成日志复制会应用日志, 之后返回结果给 client, 
-client 回显结果, 等待下一次输入.
+   客户端组件用来向用户提供命令行操作界面, 支持 set/get/exit 等命令, 命令回车之后会通过 socket 被发送到 server, server 完成日志复制会应用日志, 之后返回结果给 client, client 回显结果, 等待下一次输入.
+
+组件之间的耦合关系大致如下图, Server 对 Client, 核心组件和其他核心组件, 使用 Netty 通信. Client 对 Server 使用 `try-resource` 方式建立阻塞的 Socket 通信方式. Server 直接持有核心组件, 添加日志时直接调用, 核心组件完成日志复制之后通过回调的方式应用日志到 Server.
+
 
 ### 线程模型
 
-### 消息模型
+1. Node 
+
+   组件中包含两个线程: Scheduler 调度器线程和 TaskExecutor 任务执行线程.
+   
+   Scheduler 用来调度任务给 TaskExecutor 执行. Scheduler 一共包含两种任务, 一个是定时器任务, delay 时间之后就执行发起选举的逻辑, 在这之前节点若收到了 leader 消息那么任务将会被终止. 
+   二是日志复制任务, 这个任务在节点成为 leader 之后开始每隔一段时间就被调度一次, 用来同步 follower 节点的日志.
+
+2. Server
+
+   Server 的任务由 workerGroup 线程处理. 收到 Client 的消息之后调用核心组件同步日志, 完成同步日志后将由核心组件回调 service 的接口, 完成日志的应用.
+
+3. Client
+
+   Client 是单线程的阻塞的方式发送命令, 阻塞等待返回, 之后回显结果到命令行.
 
 ## 性能测试 📈
 
